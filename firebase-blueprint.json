@@ -1,0 +1,152 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Audit": {
+      "title": "Audit",
+      "description": "An IFS Food v8 audit session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "companyName": { "type": "string" },
+        "auditorName": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["draft", "completed"] },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyName", "ownerId", "status"]
+    },
+    "RequirementResult": {
+      "title": "RequirementResult",
+      "description": "The result of a specific requirement within an audit",
+      "type": "object",
+      "properties": {
+        "score": { "type": "string", "enum": ["A", "B", "C", "D", "Major", "N/A"] },
+        "comment": { "type": "string" },
+        "immediateAction": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Measure": {
+      "title": "Measure",
+      "description": "A corrective action (CAPA) or correction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "reqNo": { "type": "string" },
+        "reqTitle": { "type": "string" },
+        "score": { "type": "string" },
+        "deviation": { "type": "string" },
+        "type": { "type": "string", "enum": ["Korrektur", "Korrekturmaßnahme"] },
+        "responsible": { "type": "string" },
+        "deadline": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["offen", "in_bearbeitung", "umgesetzt", "wirksam_geprueft"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "ownerId": { "type": "string" }
+      }
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Supplier management info",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string", "enum": ["Rohware", "Verpackung", "Dienstleistung"] },
+        "isIfsCertified": { "type": "boolean" },
+        "certExpiry": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["freigegeben", "gesperrt", "in_pruefung"] },
+        "lastEvaluation": { "type": "string", "format": "date-time" },
+        "rawMaterials": { "type": "array", "items": { "type": "string" } },
+        "ownerId": { "type": "string" }
+      }
+    },
+    "Walkthrough": {
+      "title": "Walkthrough",
+      "description": "Periodic facility walkthroughs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "area": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "shift": { "type": "string", "enum": ["Früh", "Spät", "Nacht"] },
+        "auditor": { "type": "string" },
+        "topics": { "type": "array", "items": { "type": "string" } },
+        "findings": { "type": "string" },
+        "actionRequired": { "type": "boolean" },
+        "actionDetails": { "type": "string" },
+        "responsible": { "type": "string" },
+        "deadline": { "type": "string", "format": "date-time" },
+        "ownerId": { "type": "string" }
+      }
+    },
+    "ShiftLog": {
+      "title": "ShiftLog",
+      "description": "Personnel hygiene shift logs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "shift": { "type": "string", "enum": ["Früh", "Spät", "Nacht"] },
+        "auditor": { "type": "string" },
+        "employeeCount": { "type": "integer" },
+        "checks": {
+          "type": "object",
+          "properties": {
+            "hairnet": { "type": "boolean" },
+            "protectiveClothing": { "type": "boolean" },
+            "noJewelry": { "type": "boolean" },
+            "woundsCovered": { "type": "boolean" },
+            "noIllness": { "type": "boolean" },
+            "handsSanitized": { "type": "boolean" }
+          }
+        },
+        "deviations": { "type": "string" },
+        "action": { "type": "string" },
+        "ownerId": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User documents"
+    },
+    "/audits/{auditId}": {
+      "schema": "Audit",
+      "description": "Audit headers"
+    },
+    "/audits/{auditId}/requirements/{reqId}": {
+      "schema": "RequirementResult",
+      "description": "Individual requirement results for an audit"
+    },
+    "/measures/{measureId}": {
+      "schema": "Measure",
+      "description": "Corrective actions"
+    },
+    "/suppliers/{supplierId}": {
+      "schema": "Supplier",
+      "description": "Supplier information"
+    },
+    "/walkthroughs/{walkthroughId}": {
+      "schema": "Walkthrough",
+      "description": "Walkthrough logs"
+    },
+    "/shiftlogs/{logId}": {
+      "schema": "ShiftLog",
+      "description": "Personnel hygiene logs"
+    }
+  }
+}

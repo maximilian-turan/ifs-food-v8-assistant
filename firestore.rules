@@ -1,0 +1,176 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Entity Validations ---
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'createdAt']) &&
+             data.keys().size() == 4 &&
+             data.uid == request.auth.uid &&
+             data.email is string && data.email.size() <= 256 &&
+             data.displayName is string && data.displayName.size() <= 128 &&
+             data.createdAt == request.time;
+    }
+
+    function isValidAudit(data) {
+      return data.keys().hasAll(['companyName', 'auditorName', 'date', 'status', 'ownerId', 'createdAt', 'updatedAt']) &&
+             data.keys().size() == 7 &&
+             data.ownerId == request.auth.uid &&
+             data.companyName is string && data.companyName.size() <= 256 &&
+             data.auditorName is string && data.auditorName.size() <= 256 &&
+             data.status in ['draft', 'completed'] &&
+             data.createdAt == request.time &&
+             data.updatedAt == request.time;
+    }
+
+    function isValidRequirementResult(data) {
+      return data.keys().hasAll(['score', 'comment', 'immediateAction', 'updatedAt']) &&
+             data.keys().size() == 4 &&
+             data.score in ['A', 'B', 'C', 'D', 'Major', 'N/A'] &&
+             data.comment is string && data.comment.size() <= 2000 &&
+             data.immediateAction is string && data.immediateAction.size() <= 2000 &&
+             data.updatedAt == request.time;
+    }
+
+    function isValidMeasure(data) {
+      return data.keys().hasAll(['id', 'reqNo', 'reqTitle', 'score', 'deviation', 'type', 'responsible', 'deadline', 'status', 'createdAt', 'ownerId', 'updatedAt']) &&
+             data.keys().size() == 12 &&
+             data.ownerId == request.auth.uid &&
+             data.status in ['offen', 'in_bearbeitung', 'umgesetzt', 'wirksam_geprueft'] &&
+             data.type in ['Korrektur', 'Korrekturmaßnahme'] &&
+             data.updatedAt == request.time;
+    }
+
+    function isValidSupplier(data) {
+      return data.keys().hasAll(['id', 'name', 'category', 'isIfsCertified', 'certExpiry', 'status', 'lastEvaluation', 'rawMaterials', 'ownerId', 'updatedAt']) &&
+             data.keys().size() == 10 &&
+             data.ownerId == request.auth.uid &&
+             data.status in ['freigegeben', 'gesperrt', 'in_pruefung'] &&
+             data.category in ['Rohware', 'Verpackung', 'Dienstleistung'] &&
+             data.updatedAt == request.time;
+    }
+
+    function isValidWalkthrough(data) {
+      return data.keys().hasAll(['id', 'area', 'date', 'shift', 'auditor', 'topics', 'findings', 'actionRequired', 'ownerId', 'updatedAt']) &&
+             // actionDetails, responsible, deadline are optional
+             data.ownerId == request.auth.uid &&
+             data.shift in ['Früh', 'Spät', 'Nacht'] &&
+             data.updatedAt == request.time;
+    }
+
+    function isValidShiftLog(data) {
+      return data.keys().hasAll(['id', 'date', 'shift', 'auditor', 'employeeCount', 'checks', 'deviations', 'action', 'ownerId', 'updatedAt']) &&
+             data.keys().size() == 10 &&
+             data.ownerId == request.auth.uid &&
+             data.shift in ['Früh', 'Spät', 'Nacht'] &&
+             data.checks is map &&
+             data.updatedAt == request.time;
+    }
+
+    // --- Match Groups ---
+
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && 
+                      incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt']) &&
+                      incoming().uid == existing().uid &&
+                      incoming().email == existing().email;
+    }
+
+    match /audits/{auditId} {
+      allow get: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      
+      allow create: if isSignedIn() && isValidId(auditId) && isValidAudit(incoming());
+      
+      allow update: if isSignedIn() && isOwner(existing().ownerId) &&
+                      incoming().ownerId == existing().ownerId &&
+                      incoming().createdAt == existing().createdAt &&
+                      (
+                        // Action: Update details
+                        (incoming().diff(existing()).affectedKeys().hasOnly(['companyName', 'auditorName', 'date', 'updatedAt'])) ||
+                        // Action: Change Status
+                        (incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+                      ) &&
+                      incoming().updatedAt == request.time;
+
+      allow delete: if isSignedIn() && isOwner(existing().ownerId);
+
+      match /requirements/{reqId} {
+        allow get: if isSignedIn() && get(/databases/$(database)/documents/audits/$(auditId)).data.ownerId == request.auth.uid;
+        allow list: if isSignedIn() && get(/databases/$(database)/documents/audits/$(auditId)).data.ownerId == request.auth.uid;
+        
+        allow create: if isSignedIn() && 
+                        isValidId(reqId) &&
+                        get(/databases/$(database)/documents/audits/$(auditId)).data.ownerId == request.auth.uid &&
+                        get(/databases/$(database)/documents/audits/$(auditId)).data.status == 'draft' &&
+                        isValidRequirementResult(incoming());
+
+        allow update: if isSignedIn() && 
+                        get(/databases/$(database)/documents/audits/$(auditId)).data.ownerId == request.auth.uid &&
+                        get(/databases/$(database)/documents/audits/$(auditId)).data.status == 'draft' &&
+                        isValidRequirementResult(incoming()) &&
+                        incoming().diff(existing()).affectedKeys().hasOnly(['score', 'comment', 'immediateAction', 'updatedAt']);
+      }
+    }
+
+    match /measures/{measureId} {
+      allow get: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(measureId) && isValidMeasure(incoming());
+      allow update: if isSignedIn() && isOwner(existing().ownerId) && isValidMeasure(incoming());
+      allow delete: if isSignedIn() && isOwner(existing().ownerId);
+    }
+
+    match /suppliers/{supplierId} {
+      allow get: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(supplierId) && isValidSupplier(incoming());
+      allow update: if isSignedIn() && isOwner(existing().ownerId) && isValidSupplier(incoming());
+      allow delete: if isSignedIn() && isOwner(existing().ownerId);
+    }
+
+    match /walkthroughs/{walkthroughId} {
+      allow get: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(walkthroughId) && isValidWalkthrough(incoming());
+      allow update: if isSignedIn() && isOwner(existing().ownerId) && isValidWalkthrough(incoming());
+      allow delete: if isSignedIn() && isOwner(existing().ownerId);
+    }
+
+    match /shiftlogs/{logId} {
+      allow get: if isSignedIn() && (existing().ownerId == request.auth.uid);
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(logId) && isValidShiftLog(incoming());
+      allow update: if isSignedIn() && isOwner(existing().ownerId) && isValidShiftLog(incoming());
+      allow delete: if isSignedIn() && isOwner(existing().ownerId);
+    }
+  }
+}

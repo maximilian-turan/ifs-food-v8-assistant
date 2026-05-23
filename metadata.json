@@ -1,0 +1,6 @@
+{
+  "name": "IFS Food v8 Assistant",
+  "description": "Ein digitaler Begleiter zur Umsetzung und Auditierung des IFS Food v8 Standards mit KI-Unterstützung.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
