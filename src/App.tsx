@@ -31,8 +31,6 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { supabase, mapAudit } from './lib/supabase';
-
-type MockUser = { uid: string; displayName: string | null; email: string | null };
 import { IFS_CHAPTERS, IFSScore, IFSRequirement } from './types';
 import { MOCK_REQUIREMENTS } from './mockData';
 import { getRequirementExplanation } from './services/gemini';
@@ -43,6 +41,8 @@ import Suppliers from './components/Suppliers';
 import Walkthroughs from './components/Walkthroughs';
 import ShiftLogs from './components/ShiftLogs';
 import AllergenCalendar from './components/AllergenCalendar';
+
+type MockUser = { uid: string; displayName: string | null; email: string | null };
 
 export default function App() {
   const [user, setUser] = useState<MockUser | null>(null);
