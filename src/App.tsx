@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
+import { supabase, mapAudit } from './lib/supabase';
 
 type MockUser = { uid: string; displayName: string | null; email: string | null };
 import { IFS_CHAPTERS, IFSScore, IFSRequirement } from './types';
@@ -73,14 +74,18 @@ export default function App() {
     setAuthReady(true);
   }, []);
 
-  // Audits aus localStorage laden
+  // Audits aus Supabase laden
   useEffect(() => {
     if (!user) return;
-    const stored = localStorage.getItem('ifs_audits');
-    setAudits(stored ? JSON.parse(stored) : []);
+    supabase
+      .from('audits')
+      .select('*')
+      .eq('owner_id', user.uid)
+      .order('created_at', { ascending: false })
+      .then(({ data }) => setAudits((data || []).map(mapAudit)));
   }, [user]);
 
-  // Requirements aus localStorage laden
+  // Requirements aus Supabase laden
   useEffect(() => {
     if (!currentAuditId) {
       setScores({});
@@ -88,59 +93,51 @@ export default function App() {
       setImmediateActions({});
       return;
     }
-    const stored = localStorage.getItem(`ifs_req_${currentAuditId}`);
-    if (stored) {
-      const reqs = JSON.parse(stored);
-      const newScores: Record<string, IFSScore> = {};
-      const newComments: Record<string, string> = {};
-      const newImmediateActions: Record<string, string> = {};
-      Object.entries(reqs).forEach(([id, data]: [string, any]) => {
-        newScores[id] = data.score;
-        newComments[id] = data.comment;
-        newImmediateActions[id] = data.immediateAction;
+    supabase
+      .from('requirements')
+      .select('*')
+      .eq('audit_id', currentAuditId)
+      .then(({ data }) => {
+        const newScores: Record<string, IFSScore> = {};
+        const newComments: Record<string, string> = {};
+        const newImmediateActions: Record<string, string> = {};
+        (data || []).forEach((row: any) => {
+          newScores[row.requirement_id] = row.score;
+          newComments[row.requirement_id] = row.comment || '';
+          newImmediateActions[row.requirement_id] = row.immediate_action || '';
+        });
+        setScores(newScores);
+        setComments(newComments);
+        setImmediateActions(newImmediateActions);
       });
-      setScores(newScores);
-      setComments(newComments);
-      setImmediateActions(newImmediateActions);
-    } else {
-      setScores({});
-      setComments({});
-      setImmediateActions({});
-    }
   }, [currentAuditId]);
 
   const createAudit = async () => {
     if (!user || !newAuditName.trim()) return;
     setIsCreatingAudit(true);
     const auditId = `audit_${Date.now()}`;
-    const auditData = {
+    const { data, error } = await supabase.from('audits').insert({
       id: auditId,
-      companyName: newAuditName.trim(),
-      auditorName: user.displayName || 'Unbenannt',
+      company_name: newAuditName.trim(),
+      auditor_name: user.displayName || 'Unbenannt',
       date: new Date().toISOString(),
       status: 'draft',
-      ownerId: user.uid,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    const existing = JSON.parse(localStorage.getItem('ifs_audits') || '[]');
-    const updated = [auditData, ...existing];
-    localStorage.setItem('ifs_audits', JSON.stringify(updated));
-    setAudits(updated);
-    setCurrentAuditId(auditId);
-    setView('audit');
-    setShowCreateModal(false);
-    setNewAuditName('');
+      owner_id: user.uid,
+    }).select().single();
+    if (!error && data) {
+      setAudits(prev => [mapAudit(data), ...prev]);
+      setCurrentAuditId(auditId);
+      setView('audit');
+      setShowCreateModal(false);
+      setNewAuditName('');
+    }
     setIsCreatingAudit(false);
   };
 
   const deleteAudit = async () => {
     if (!auditToDelete) return;
-    const existing = JSON.parse(localStorage.getItem('ifs_audits') || '[]');
-    const updated = existing.filter((a: any) => a.id !== auditToDelete);
-    localStorage.setItem('ifs_audits', JSON.stringify(updated));
-    localStorage.removeItem(`ifs_req_${auditToDelete}`);
-    setAudits(updated);
+    await supabase.from('audits').delete().eq('id', auditToDelete);
+    setAudits(prev => prev.filter((a: any) => a.id !== auditToDelete));
     if (currentAuditId === auditToDelete) setCurrentAuditId(null);
     setAuditToDelete(null);
   };
@@ -152,10 +149,14 @@ export default function App() {
 
   function saveRequirement(reqId: string, data: { score: IFSScore; comment: string; immediateAction: string }) {
     if (!currentAuditId) return;
-    const stored = localStorage.getItem(`ifs_req_${currentAuditId}`);
-    const reqs = stored ? JSON.parse(stored) : {};
-    reqs[reqId] = { ...data, updatedAt: new Date().toISOString() };
-    localStorage.setItem(`ifs_req_${currentAuditId}`, JSON.stringify(reqs));
+    supabase.from('requirements').upsert({
+      audit_id: currentAuditId,
+      requirement_id: reqId,
+      score: data.score,
+      comment: data.comment,
+      immediate_action: data.immediateAction,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'audit_id,requirement_id' });
   }
 
   function handleScoreChange(reqId: string, score: IFSScore) {
