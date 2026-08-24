@@ -4,7 +4,9 @@
 
 **Goal:** Migrate the app's AI features from Gemini to Claude, and add a photo-upload + Claude-vision-analysis flow to the (currently mock-only) "Begehungen" (walkthroughs) module, persisting everything in Supabase.
 
-**Architecture:** `server.ts` (Express) exposes three `POST` JSON endpoints backed by the Anthropic SDK (`claude-opus-5`): the two existing `/api/explain` and `/api/advice` (migrated from Gemini) and a new `/api/walkthrough-analysis` (vision). The frontend's `src/services/ai.ts` (renamed from `gemini.ts`) wraps all three with fetch calls. `Walkthroughs.tsx` becomes self-contained: it loads/saves directly against Supabase (table `walkthroughs`, storage bucket `walkthrough-photos`), the same way `Dashboard`'s parent (`App.tsx`) does for audits — except Walkthroughs owns its own data instead of routing through `App.tsx`, since it has no cross-cutting state dependency on the audit editor.
+**Architecture:** `server.ts` (Express, used by `npm run dev` locally) exposes three `POST` JSON endpoints backed by the Anthropic SDK (`claude-opus-5`): the two existing `/api/explain` and `/api/advice` (migrated from Gemini) and a new `/api/walkthrough-analysis` (vision). **This project also deploys to Vercel** (`vercel.json` present) with a *separate, parallel* implementation of the same two existing endpoints as Vercel Serverless Functions under `api/explain.ts` and `api/advice.ts` (Web Fetch `Request`/`Response` handlers, not Express) — these currently also import `@google/genai` and must be migrated too, and a new `api/walkthrough-analysis.ts` must be added alongside them so the photo-analysis feature works in the Vercel-deployed production build, not just local dev. The frontend's `src/services/ai.ts` (renamed from `gemini.ts`) wraps all three logical operations with fetch calls — from the browser's perspective there is one `/api/*` surface; which backend (`server.ts` locally vs `api/*.ts` on Vercel) serves it is a deployment-time concern the frontend doesn't need to know about. `Walkthroughs.tsx` becomes self-contained: it loads/saves directly against Supabase (table `walkthroughs`, storage bucket `walkthrough-photos`), the same way `Dashboard`'s parent (`App.tsx`) does for audits — except Walkthroughs owns its own data instead of routing through `App.tsx`, since it has no cross-cutting state dependency on the audit editor.
+
+**Plan amendment (discovered during Task 1 review):** the original plan only accounted for `server.ts` and missed the parallel `api/*.ts` Vercel functions. Task 3 below now covers both.
 
 **Tech Stack:** React 19 + Vite + Express (existing), `@anthropic-ai/sdk` (new), Supabase JS client + Storage (existing pattern), Tailwind (existing).
 
@@ -21,7 +23,7 @@
 
 Run:
 ```bash
-cd /Users/maximilianturan/Documents/ClaudeProjekte/ifs-food-v8-assistant
+cd /Users/maximilianturan/.config/superpowers/worktrees/ifs-food-v8-assistant/walkthrough-photo-analysis
 npm uninstall @google/genai
 npm install @anthropic-ai/sdk@^0.120.0
 ```
@@ -86,12 +88,17 @@ git commit -m "Point env var docs at ANTHROPIC_API_KEY"
 
 ---
 
-### Task 3: Migrate server.ts to Claude and add the photo-analysis endpoint
+### Task 3: Migrate server.ts and the Vercel api/*.ts functions to Claude, add photo-analysis to both
 
 **Files:**
-- Modify: `server.ts` (full rewrite of AI-related sections)
+- Modify: `server.ts` (full rewrite of AI-related sections) — used by `npm run dev` locally
+- Modify: `api/explain.ts` (full rewrite) — used when deployed to Vercel
+- Modify: `api/advice.ts` (full rewrite) — used when deployed to Vercel
+- Create: `api/walkthrough-analysis.ts` — used when deployed to Vercel
 
-- [ ] **Step 1: Replace the entire file content**
+This project deploys to Vercel (see `vercel.json`), which routes `/api/*` requests to the matching file under `api/` as a standalone serverless function — **not** through `server.ts` (that file only runs the local Express dev server via `npm run dev`). Both code paths currently call Gemini and must be migrated together, or the feature will work locally but break (or stay on Gemini) once deployed.
+
+- [ ] **Step 1: Replace the entire content of `server.ts`**
 
 Replace all of `server.ts` with:
 
@@ -253,16 +260,166 @@ startServer();
 
 Note: `express.json({ limit: "25mb" })` replaces the previous default 100kb body limit — necessary because a walkthrough with several resized (~1568px) JPEG photos as base64 can exceed the default.
 
-- [ ] **Step 2: Typecheck**
+- [ ] **Step 2: Replace the entire content of `api/explain.ts`**
 
-Run: `cd /Users/maximilianturan/Documents/ClaudeProjekte/ifs-food-v8-assistant && npm run lint`
-Expected: no errors related to `server.ts`. (Errors from files not yet touched by this plan, e.g. `Walkthroughs.tsx` referencing `photoPaths`, are expected until later tasks — ignore those for now.)
+Current content uses `GoogleGenAI` with the Web Fetch `Request`/`Response` handler shape (Vercel function convention — different from Express, no `req.body`/`res.json`). Replace all of `api/explain.ts` with:
 
-- [ ] **Step 3: Commit**
+```typescript
+import Anthropic from "@anthropic-ai/sdk";
+
+export default async function handler(req: Request) {
+  if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return Response.json({ error: "ANTHROPIC_API_KEY nicht konfiguriert." }, { status: 500 });
+  }
+
+  const { requirementId, title, description } = await req.json();
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+  try {
+    const prompt = `Erkläre mir die Anforderung ${requirementId} ("${title}") des IFS Food v8 Standards.
+      Die Beschreibung lautet: ${description}
+
+      Was wird hier konkret von einem Unternehmen erwartet? Gib praktische Beispiele für die Umsetzung und Dokumentation.
+      Antwort auf Deutsch, professionell und hilfreich für einen Qualitätsmanager. Benutze Markdown für die Formatierung.`;
+
+    const response = await anthropic.messages.create({
+      model: "claude-opus-5",
+      max_tokens: 4096,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === "text");
+    return Response.json({ text: textBlock?.text || "" });
+  } catch (error) {
+    if (error instanceof Anthropic.AuthenticationError) {
+      return Response.json({ error: "Claude API Fehler: Key ungültig oder Zugriff verweigert." }, { status: 500 });
+    }
+    return Response.json({ error: "Fehler beim Abrufen der Erklärung." }, { status: 500 });
+  }
+}
+```
+
+- [ ] **Step 3: Replace the entire content of `api/advice.ts`**
+
+Replace all of `api/advice.ts` with:
+
+```typescript
+import Anthropic from "@anthropic-ai/sdk";
+
+export default async function handler(req: Request) {
+  if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return Response.json({ error: "ANTHROPIC_API_KEY nicht konfiguriert." }, { status: 500 });
+  }
+
+  const { findings } = await req.json();
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+  try {
+    const prompt = `Ich habe folgende Feststellungen bei einem IFS Food v8 Audit gemacht:
+      "${findings}"
+
+      Wie würdest du diese Abweichung bewerten (A, B, C, D, Major, KO)?
+      Welche Korrekturmaßnahmen schlägst du vor?
+      Antwort auf Deutsch. Benutze Markdown.`;
+
+    const response = await anthropic.messages.create({
+      model: "claude-opus-5",
+      max_tokens: 4096,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === "text");
+    return Response.json({ text: textBlock?.text || "" });
+  } catch (error) {
+    if (error instanceof Anthropic.AuthenticationError) {
+      return Response.json({ error: "Claude API Fehler: Key ungültig oder Zugriff verweigert." }, { status: 500 });
+    }
+    return Response.json({ error: "Fehler beim Abrufen der Beratung." }, { status: 500 });
+  }
+}
+```
+
+- [ ] **Step 4: Create `api/walkthrough-analysis.ts`**
+
+Same logic as the `server.ts` `/api/walkthrough-analysis` route (Step 1 above), ported to the Vercel handler shape:
+
+```typescript
+import Anthropic from "@anthropic-ai/sdk";
+import { IFS_CHAPTERS } from "../src/types";
+
+export default async function handler(req: Request) {
+  if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return Response.json({ error: "ANTHROPIC_API_KEY nicht konfiguriert." }, { status: 500 });
+  }
+
+  const { area, topics, images } = await req.json() as {
+    area: string;
+    topics: string[];
+    images: { data: string; mediaType: "image/jpeg" }[];
+  };
+
+  if (!images || images.length === 0) {
+    return Response.json({ error: "Keine Fotos übermittelt." }, { status: 400 });
+  }
+
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+  try {
+    const chapterContext = IFS_CHAPTERS.map(c => `Kapitel ${c.id}: ${c.title} — ${c.description}`).join("\n");
+
+    const prompt = `Du bist ein erfahrener IFS Food v8 Auditor. Ein Nutzer hat gerade eine Betriebsbegehung im Bereich "${area}" durchgeführt (Themen: ${topics.length ? topics.join(", ") : "keine Angabe"}) und folgende Fotos aufgenommen.
+
+IFS Food v8 Kapitelstruktur zur Orientierung:
+${chapterContext}
+
+Analysiere die Fotos und beschreibe:
+1. Was ist auf den Fotos zu sehen (kurz)?
+2. Welche Punkte sind bezüglich IFS Food v8 auffällig — was fehlt, was ist nicht konform, was sollte verbessert werden? Beziehe dich wo möglich auf das passende IFS-Kapitel.
+3. Was sollte konkret getan werden?
+
+Antworte auf Deutsch, als zusammenhängender Freitext-Bericht (kein JSON), professionell und praxisnah für einen Qualitätsmanager. Falls nichts Auffälliges zu erkennen ist, sag das auch klar.`;
+
+    const content: Anthropic.ContentBlockParam[] = images.map((img): Anthropic.ImageBlockParam => ({
+      type: "image",
+      source: { type: "base64", media_type: img.mediaType, data: img.data },
+    }));
+    content.push({ type: "text", text: prompt });
+
+    const response = await anthropic.messages.create({
+      model: "claude-opus-5",
+      max_tokens: 4096,
+      messages: [{ role: "user", content }],
+    });
+
+    const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === "text");
+    return Response.json({ text: textBlock?.text || "" });
+  } catch (error) {
+    if (error instanceof Anthropic.AuthenticationError) {
+      return Response.json({ error: "Claude API Fehler: Key ungültig oder Zugriff verweigert." }, { status: 500 });
+    }
+    return Response.json({ error: "Fehler bei der Fotoanalyse." }, { status: 500 });
+  }
+}
+```
+
+Known limitation, not solved here (out of scope — note it in the final report): Vercel Serverless Functions have a request body size limit (platform-dependent, historically ~4.5MB). Several resized (~1568px) JPEG photos as base64 in one request could approach this on the Vercel deployment even though the local Express server (`server.ts`, `limit: "25mb"`) has more headroom. If this becomes a problem in practice, the fix is capping the number of photos per analysis or switching to individual per-photo requests — not needed now.
+
+- [ ] **Step 5: Typecheck**
+
+Run: `npm run lint` (from the worktree root)
+Expected: no errors related to `server.ts`, `api/explain.ts`, `api/advice.ts`, or `api/walkthrough-analysis.ts`. (Errors from files not yet touched by this plan, e.g. `Walkthroughs.tsx` referencing `photoPaths`, are expected until later tasks — ignore those for now. The pre-existing `src/lib/supabase.ts` `ImportMeta.env` errors are also expected — pre-existing baseline noise, unrelated to this plan.)
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add server.ts
-git commit -m "Migrate AI endpoints from Gemini to Claude, add walkthrough-analysis endpoint"
+git add server.ts api/explain.ts api/advice.ts api/walkthrough-analysis.ts
+git commit -m "Migrate AI endpoints (server.ts and Vercel api/*.ts) from Gemini to Claude, add walkthrough-analysis endpoint to both"
 ```
 
 ---
@@ -275,7 +432,7 @@ git commit -m "Migrate AI endpoints from Gemini to Claude, add walkthrough-analy
 - [ ] **Step 1: Rename the file**
 
 ```bash
-cd /Users/maximilianturan/Documents/ClaudeProjekte/ifs-food-v8-assistant
+cd /Users/maximilianturan/.config/superpowers/worktrees/ifs-food-v8-assistant/walkthrough-photo-analysis
 git mv src/services/gemini.ts src/services/ai.ts
 ```
 
@@ -412,18 +569,20 @@ git commit -m "Update App.tsx import for renamed ai service"
 
 **Files:** none (verification only)
 
-- [ ] **Step 1: Restart the dev server**
+- [ ] **Step 1: Start the worktree's dev server on a separate port**
+
+The main repo (not this worktree) may already have its own `npm run dev` running on port 3001 — do NOT kill port 3001 or touch anything outside this worktree. Use port 3002 for this worktree instead:
 
 ```bash
-cd /Users/maximilianturan/Documents/ClaudeProjekte/ifs-food-v8-assistant
-lsof -ti:3001 -sTCP:LISTEN | xargs -r kill
-npm run dev
+cd /Users/maximilianturan/.config/superpowers/worktrees/ifs-food-v8-assistant/walkthrough-photo-analysis
+lsof -ti:3002 -sTCP:LISTEN | xargs -r kill
+PORT=3002 npm run dev
 ```
-(Run in background; wait for `Server running on http://localhost:3001` in its output before continuing.)
+(Run in background; wait for `Server running on http://localhost:3002` in its output before continuing.)
 
 - [ ] **Step 2: Confirm the server no longer references Gemini**
 
-Run: `curl -s -X POST http://localhost:3001/api/explain -H "Content-Type: application/json" -d '{"requirementId":"1.1.1","title":"Test","description":"Test"}'`
+Run: `curl -s -X POST http://localhost:3002/api/explain -H "Content-Type: application/json" -d '{"requirementId":"1.1.1","title":"Test","description":"Test"}'`
 
 Expected (no `ANTHROPIC_API_KEY` set yet, since the user will add it later): HTTP 500 body containing `"ANTHROPIC_API_KEY"`, NOT `"GEMINI_API_KEY"`.
 
@@ -1245,20 +1404,22 @@ git commit -m "Add real persistence, photo upload, and Claude photo analysis to 
 
 **Files:** none (verification only)
 
-- [ ] **Step 1: Restart the dev server**
+- [ ] **Step 1: Start the worktree's dev server on a separate port**
+
+The main repo (not this worktree) may already have its own `npm run dev` running on port 3001 — do NOT kill port 3001 or touch anything outside this worktree. Use port 3002 for this worktree instead:
 
 ```bash
-cd /Users/maximilianturan/Documents/ClaudeProjekte/ifs-food-v8-assistant
-lsof -ti:3001 -sTCP:LISTEN | xargs -r kill
-npm run dev
+cd /Users/maximilianturan/.config/superpowers/worktrees/ifs-food-v8-assistant/walkthrough-photo-analysis
+lsof -ti:3002 -sTCP:LISTEN | xargs -r kill
+PORT=3002 npm run dev
 ```
-Wait for `Server running on http://localhost:3001`.
+Wait for `Server running on http://localhost:3002`.
 
 - [ ] **Step 2: Drive the app with a headless browser**
 
 Use the same approach as earlier in this session (chromium-cli is not installed; use the Playwright package cached under `~/.npm/_npx/9833c18b2d85bc59/node_modules` together with the `Google Chrome for Testing` binary under `~/Library/Caches/ms-playwright/chromium-1234/...`, as already proven to work). Script:
 
-1. Navigate to `http://localhost:3001`, click "Begehungen" in the sidebar.
+1. Navigate to `http://localhost:3002`, click "Begehungen" in the sidebar.
 2. Click "NEUE BEGEHUNG" — confirm the modal opens with all fields (Bereich, Schicht, Datum, Prüfer, Themen, Fotos, Befunde, Handlungsbedarf).
 3. Select 1-2 small test images for the photo input.
 4. Click "FOTOS ANALYSIEREN" — confirm either (a) with a real `ANTHROPIC_API_KEY` set, the Befunde textarea fills with a German report referencing IFS chapters, or (b) without a key, `analysisError` displays a clear German message and the rest of the form stays usable.
