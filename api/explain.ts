@@ -19,13 +19,14 @@ export default async function handler(req: Request) {
 
     const response = await anthropic.messages.create({
       model: "claude-opus-5",
-      max_tokens: 4096,
+      max_tokens: 16000,
       messages: [{ role: "user", content: prompt }],
     });
 
     const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === "text");
     return Response.json({ text: textBlock?.text || "" });
   } catch (error) {
+    console.error("Claude Error:", error);
     if (error instanceof Anthropic.AuthenticationError) {
       return Response.json({ error: "Claude API Fehler: Key ungültig oder Zugriff verweigert." }, { status: 500 });
     }

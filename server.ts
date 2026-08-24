@@ -45,7 +45,7 @@ async function startServer() {
 
       const response = await anthropic.messages.create({
         model: "claude-opus-5",
-        max_tokens: 4096,
+        max_tokens: 16000,
         messages: [{ role: "user", content: prompt }],
       });
 
@@ -72,7 +72,7 @@ async function startServer() {
 
       const response = await anthropic.messages.create({
         model: "claude-opus-5",
-        max_tokens: 4096,
+        max_tokens: 16000,
         messages: [{ role: "user", content: prompt }],
       });
 
@@ -120,7 +120,7 @@ Antworte auf Deutsch, als zusammenhängender Freitext-Bericht (kein JSON), profe
 
       const response = await anthropic.messages.create({
         model: "claude-opus-5",
-        max_tokens: 4096,
+        max_tokens: 16000,
         messages: [{ role: "user", content }],
       });
 

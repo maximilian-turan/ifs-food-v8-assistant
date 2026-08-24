@@ -65,6 +65,7 @@ function emptyForm(): WalkthroughForm {
 export default function Walkthroughs() {
   const [walkthroughs, setWalkthroughs] = useState<IFSWalkthrough[]>([]);
   const [isLoadingList, setIsLoadingList] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string[]>>({});
 
   const [showModal, setShowModal] = useState(false);
@@ -80,8 +81,13 @@ export default function Walkthroughs() {
       .from('walkthroughs')
       .select('*')
       .order('date', { ascending: false })
-      .then(({ data }) => {
-        setWalkthroughs((data || []).map(mapWalkthrough));
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('Failed to load walkthroughs:', error);
+          setListError('Begehungen konnten nicht geladen werden.');
+        } else {
+          setWalkthroughs((data || []).map(mapWalkthrough));
+        }
         setIsLoadingList(false);
       });
   }, []);
@@ -281,8 +287,12 @@ export default function Walkthroughs() {
           <p className="text-sm font-bold text-surface-400">Lädt...</p>
         )}
 
-        {!isLoadingList && walkthroughs.length === 0 && (
+        {!isLoadingList && !listError && walkthroughs.length === 0 && (
           <p className="text-sm font-bold text-surface-400">Noch keine Begehungen erfasst.</p>
+        )}
+
+        {listError && (
+          <p className="text-sm font-bold text-red-600">{listError}</p>
         )}
 
         <div className="grid gap-6">
