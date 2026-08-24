@@ -33,7 +33,7 @@ import ReactMarkdown from 'react-markdown';
 import { supabase, mapAudit } from './lib/supabase';
 import { IFS_CHAPTERS, IFSScore, IFSRequirement } from './types';
 import { MOCK_REQUIREMENTS } from './mockData';
-import { getRequirementExplanation } from './services/gemini';
+import { getRequirementExplanation } from './services/ai';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
 import Measures from './components/Measures';
