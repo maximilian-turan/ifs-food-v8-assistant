@@ -73,6 +73,7 @@ export default function Walkthroughs() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     supabase
@@ -146,6 +147,7 @@ export default function Walkthroughs() {
     setForm(emptyForm());
     setPhotos([]);
     setAnalysisError(null);
+    setSaveError(null);
   }
 
   async function analyzePhotos() {
@@ -167,39 +169,64 @@ export default function Walkthroughs() {
   async function saveWalkthrough() {
     if (!form.area || isSaving) return;
     setIsSaving(true);
-    const id = `walkthrough_${Date.now()}`;
+    setSaveError(null);
+    try {
+      const id = `walkthrough_${Date.now()}`;
 
-    const photoPaths: string[] = [];
-    for (const draft of photos) {
-      const path = `${id}/${Date.now()}-${draft.file.name}`;
-      const { error } = await supabase.storage.from('walkthrough-photos').upload(path, draft.file);
-      if (!error) photoPaths.push(path);
-    }
+      const uploadResults = await Promise.allSettled(
+        photos.map(draft => {
+          const path = `${id}/${Date.now()}-${draft.file.name}`;
+          return supabase.storage.from('walkthrough-photos').upload(path, draft.file).then(({ error }) => {
+            if (error) throw error;
+            return path;
+          });
+        })
+      );
 
-    const { data, error } = await supabase
-      .from('walkthroughs')
-      .insert({
-        id,
-        area: form.area,
-        date: new Date(form.date).toISOString(),
-        shift: form.shift,
-        auditor: form.auditor,
-        topics: form.topics,
-        findings: form.findings,
-        action_required: form.actionRequired,
-        action_details: form.actionDetails,
-        responsible: form.responsible,
-        deadline: form.deadline || null,
-        photo_paths: photoPaths,
-      })
-      .select()
-      .single();
+      const photoPaths = uploadResults
+        .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
+        .map(r => r.value);
+      const failedUploadCount = uploadResults.length - photoPaths.length;
 
-    if (!error && data) {
+      const parsedDate = new Date(form.date);
+      if (Number.isNaN(parsedDate.getTime())) {
+        throw new Error('Ungültiges Datum. Bitte ein gültiges Datum auswählen.');
+      }
+
+      const { data, error } = await supabase
+        .from('walkthroughs')
+        .insert({
+          id,
+          area: form.area,
+          date: parsedDate.toISOString(),
+          shift: form.shift,
+          auditor: form.auditor,
+          topics: form.topics,
+          findings: form.findings,
+          action_required: form.actionRequired,
+          action_details: form.actionDetails,
+          responsible: form.responsible,
+          deadline: form.deadline || null,
+          photo_paths: photoPaths,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (!data) throw new Error('Begehung konnte nicht gespeichert werden.');
+
       setWalkthroughs(prev => [mapWalkthrough(data), ...prev]);
-      closeModal();
+
+      if (failedUploadCount > 0) {
+        setSaveError(`Begehung gespeichert, aber ${failedUploadCount} von ${uploadResults.length} Fotos konnten nicht hochgeladen werden.`);
+      } else {
+        closeModal();
+      }
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Fehler beim Speichern der Begehung.');
+    } finally {
+      setIsSaving(false);
     }
-    setIsSaving(false);
   }
 
   return (
@@ -326,7 +353,7 @@ export default function Walkthroughs() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-[#000]/40 backdrop-blur-md z-[100] flex items-center justify-center p-6"
-            onClick={closeModal}
+            onClick={() => !isSaving && closeModal()}
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -345,7 +372,8 @@ export default function Walkthroughs() {
                 </div>
                 <button
                   onClick={closeModal}
-                  className="p-3 hover:bg-surface-50 rounded-2xl transition-all text-surface-300 hover:text-surface-900"
+                  disabled={isSaving}
+                  className="p-3 hover:bg-surface-50 rounded-2xl transition-all text-surface-300 hover:text-surface-900 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <X size={20} />
                 </button>
@@ -519,10 +547,15 @@ export default function Walkthroughs() {
                   </div>
                 )}
 
+                {saveError && (
+                  <p className="text-xs font-bold text-red-600">{saveError}</p>
+                )}
+
                 <div className="flex gap-4">
                   <button
                     onClick={closeModal}
-                    className="flex-1 px-8 py-5 rounded-2xl micro-label text-surface-400 hover:bg-surface-50 transition-all font-bold"
+                    disabled={isSaving}
+                    className="flex-1 px-8 py-5 rounded-2xl micro-label text-surface-400 hover:bg-surface-50 transition-all font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     ABBRECHEN
                   </button>
