@@ -62,6 +62,7 @@ export interface WalkthroughPhoto {
   mediaType: "image/jpeg";
 }
 
+// Throws (unlike the functions above) so the caller can distinguish a failed analysis from a successful one.
 export async function analyzeWalkthroughPhotos(area: string, topics: string[], images: WalkthroughPhoto[]) {
   const response = await fetch("/api/walkthrough-analysis", {
     method: "POST",
