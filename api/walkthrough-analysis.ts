@@ -1,5 +1,16 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { IFS_CHAPTERS } from "../src/types";
+
+// Duplicated from src/types.ts rather than imported: Vercel's function
+// bundler for api/*.ts does not reliably trace/bundle relative imports
+// that cross outside the api/ directory (confirmed in production via
+// ERR_MODULE_NOT_FOUND for "../src/types" at runtime).
+const IFS_CHAPTERS = [
+  { id: 1, title: 'Unternehmensführung & -verpflichtung', description: 'Verantwortung der Unternehmensleitung, Politik, Struktur und Managementbewertung.' },
+  { id: 2, title: 'QM- & Lebensmittelsicherheits-System', description: 'HACCP-System, Dokumentationsanforderungen und Aufzeichnungen.' },
+  { id: 3, title: 'Ressourcenmanagement', description: 'Personalressourcen, Hygiene, Schulung und Sozialeinrichtungen.' },
+  { id: 4, title: 'Operative Abläufe', description: 'Größtes Kapitel: Von Einkauf über Produktion bis hin zu Rückverfolgbarkeit und Produktschutz.' },
+  { id: 5, title: 'Messungen, Analysen, Verbesserungen', description: 'Interne Audits, Betriebsbegehungen, Prozesskontrolle und Korrekturmaßnahmen.' },
+];
 
 export async function POST(req: Request) {
   if (!process.env.ANTHROPIC_API_KEY) {
