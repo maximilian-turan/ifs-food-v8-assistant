@@ -30,7 +30,7 @@ export async function getRequirementExplanation(requirementId: string, title: st
   } catch (error) {
     console.error("Fetch Error:", error);
     // Provide a more helpful generic message if API fails
-    return "💡 **Hinweis:** Die KI-Erklärung ist derzeit nicht verfügbar, da der Gemini API Key nicht konfiguriert ist (siehe 'Settings > Secrets').\n\n**Anforderungstext:** " + description;
+    return "💡 **Hinweis:** Die KI-Erklärung ist derzeit nicht verfügbar, da der Claude API Key nicht konfiguriert ist (siehe 'Settings > Secrets').\n\n**Anforderungstext:** " + description;
   }
 }
 
@@ -55,4 +55,28 @@ export async function getAuditAdvice(findings: string) {
     console.error("Fetch Error:", error);
     return "Fehler beim Abrufen der Beratung.";
   }
+}
+
+export interface WalkthroughPhoto {
+  data: string; // base64, no data: URL prefix
+  mediaType: "image/jpeg";
+}
+
+// Throws (unlike the functions above) so the caller can distinguish a failed analysis from a successful one.
+export async function analyzeWalkthroughPhotos(area: string, topics: string[], images: WalkthroughPhoto[]) {
+  const response = await fetch("/api/walkthrough-analysis", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ area, topics, images }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Fehler bei der Fotoanalyse.");
+  }
+
+  const data = await response.json();
+  return data.text as string;
 }

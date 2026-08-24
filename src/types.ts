@@ -66,6 +66,7 @@ export interface IFSWalkthrough {
   actionDetails?: string;
   responsible?: string;
   deadline?: string;
+  photoPaths: string[];
 }
 
 export interface IFSShiftLog {
