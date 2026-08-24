@@ -13,3 +13,18 @@ export const mapAudit = (row: any) => ({
   status: row.status,
   ownerId: row.owner_id,
 });
+
+export const mapWalkthrough = (row: any) => ({
+  id: row.id,
+  area: row.area,
+  date: row.date,
+  shift: row.shift,
+  auditor: row.auditor,
+  topics: row.topics || [],
+  findings: row.findings || '',
+  actionRequired: row.action_required,
+  actionDetails: row.action_details || '',
+  responsible: row.responsible || '',
+  deadline: row.deadline || undefined,
+  photoPaths: row.photo_paths || [],
+});
